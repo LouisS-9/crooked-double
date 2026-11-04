@@ -1,0 +1,43 @@
+name: Build CROOKED DOUBLE
+on:
+  push:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  mac:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Write source
+        run: CROOKED_DIR="$PWD/src" bash CrookedDouble-mac-build.sh --extract-only
+      - name: Build
+        run: |
+          cmake -S src -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 -DCROOKED_BUILD_TESTS=ON
+          cmake --build build --config Release -j 3 --target CrookedDouble_VST3 CrookedDouble_AU CrookedEngineTests
+      - name: Test DSP
+        run: ./build/CrookedEngineTests
+      - name: Make installer
+        run: |
+          ART=build/CrookedDouble_artefacts/Release
+          R=pkgroot/Library/Audio/Plug-Ins
+          mkdir -p "$R/VST3" "$R/Components"
+          cp -R "$ART/VST3/CROOKED DOUBLE.vst3" "$R/VST3/"
+          cp -R "$ART/AU/CROOKED DOUBLE.component" "$R/Components/"
+          codesign --force --deep --sign - "$R/VST3/CROOKED DOUBLE.vst3"
+          codesign --force --deep --sign - "$R/Components/CROOKED DOUBLE.component"
+          pkgbuild --analyze --root pkgroot comp.plist
+          n=$(grep -c RootRelativeBundlePath comp.plist)
+          for i in $(seq 0 $((n-1))); do /usr/libexec/PlistBuddy -c "Set :$i:BundleIsRelocatable false" comp.plist; done
+          pkgbuild --root pkgroot --component-plist comp.plist --identifier com.ldsaudio.crookeddouble --version 1.0.0 --install-location / CROOKED-DOUBLE-Installer.pkg
+      - name: Check AU
+        continue-on-error: true
+        run: |
+          killall -9 AudioComponentRegistrar || true
+          auval -v aufx Crkd Ldsa | tail -5
+      - name: Publish download
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest CROOKED-DOUBLE-Installer.pkg --title "CROOKED DOUBLE" --notes "Download the .pkg and open it. Then Rescan plug-ins in Live."
