@@ -18,29 +18,30 @@ jobs:
           cmake --build build --config Release -j 3 --target CrookedDouble_VST3 CrookedDouble_AU CrookedEngineTests
       - name: Test DSP
         run: ./build/CrookedEngineTests
-      - name: Make installer
+      - name: Sign and push build to dist branch
         run: |
           ART=build/CrookedDouble_artefacts/Release
-          R=pkgroot/Library/Audio/Plug-Ins
-          mkdir -p "$R/VST3" "$R/Components"
-          cp -R "$ART/VST3/CROOKED DOUBLE.vst3" "$R/VST3/"
-          cp -R "$ART/AU/CROOKED DOUBLE.component" "$R/Components/"
-          codesign --force --deep --sign - "$R/VST3/CROOKED DOUBLE.vst3"
-          codesign --force --deep --sign - "$R/Components/CROOKED DOUBLE.component"
-          pkgbuild --analyze --root pkgroot comp.plist
-          n=$(grep -c RootRelativeBundlePath comp.plist)
-          for i in $(seq 0 $((n-1))); do /usr/libexec/PlistBuddy -c "Set :$i:BundleIsRelocatable false" comp.plist; done
-          pkgbuild --root pkgroot --component-plist comp.plist --identifier com.ldsaudio.crookeddouble --version 1.0.0 --install-location / CROOKED-DOUBLE-Installer.pkg
-      - name: Push build to dist branch
-        run: |
-          tar -czf crooked-double-mac.tar.gz -C pkgroot/Library/Audio/Plug-Ins VST3 Components
+          mkdir -p out/VST3 out/Components
+          cp -R "$ART/VST3/CROOKED DOUBLE.vst3" out/VST3/
+          cp -R "$ART/AU/CROOKED DOUBLE.component" out/Components/
+          codesign --force --deep --sign - "out/VST3/CROOKED DOUBLE.vst3"
+          codesign --force --deep --sign - "out/Components/CROOKED DOUBLE.component"
+          tar -czf crooked-double-mac.tar.gz -C out VST3 Components
+          cp crooked-double-mac.tar.gz /tmp/
           git config user.name github-actions
           git config user.email github-actions@users.noreply.github.com
           git checkout --orphan dist
           git rm -rf --cached . > /dev/null
-          git add -f crooked-double-mac.tar.gz CROOKED-DOUBLE-Installer.pkg
+          cp /tmp/crooked-double-mac.tar.gz .
+          git add -f crooked-double-mac.tar.gz
           git commit -m "build $GITHUB_SHA"
           git push -f origin dist
+      - name: Make installer
+        continue-on-error: true
+        run: |
+          mkdir -p pkgroot/Library/Audio/Plug-Ins
+          cp -R out/VST3 out/Components pkgroot/Library/Audio/Plug-Ins/
+          pkgbuild --root pkgroot --identifier com.ldsaudio.crookeddouble --version 1.0.0 --install-location / CROOKED-DOUBLE-Installer.pkg
       - name: Check AU
         continue-on-error: true
         run: |
@@ -52,4 +53,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete latest --yes --cleanup-tag || true
-          gh release create latest CROOKED-DOUBLE-Installer.pkg --title "CROOKED DOUBLE" --notes "Download the .pkg and open it. Then Rescan plug-ins in Live."
+          gh release create latest CROOKED-DOUBLE-Installer.pkg crooked-double-mac.tar.gz --title "CROOKED DOUBLE" --notes "Download the .pkg and open it. Then Rescan plug-ins in Live."
